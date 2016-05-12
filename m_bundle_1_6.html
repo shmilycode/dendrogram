@@ -1,0 +1,487 @@
+<!DOCTYPE>
+<html>
+  <head>
+    <meta charset = "utf-8">
+    <meta  http-equiv="Access-Control-Allow-Origin" content="*">
+    <link rel="stylesheet" type="text/css" href="./bundle_style.css"/>
+   </head>
+  <body>
+    <script type = "text/javascript" src="d3.min.js"></script>
+    <script type = "text/javascript" src="dataset.js"></script>
+    <script>
+    	var paths = {};
+	var links = [];
+	var w= document.body.clientWidth-200;
+	var h = document.body.clientHeight-60;
+	var rx = w/2;
+	var ry = h/2;
+	var m0;
+	rotate = 0;
+
+	var body = d3.select("body");
+	var span = body.append("span")
+		.attr("class","bckg");
+	var header = body.append("header")
+		.attr("class", "header");
+	var main = body.append("main");
+
+	header.append("h1")
+		.text("Message");
+	main.append("h2")
+		.attr("class", "graphic_title")
+		.text("Graphics");
+	var div = main.append("div")
+		.attr("clas", "svg_div")
+		.attr("width", w)
+		.attr("height", h);
+
+	var svg = div.append("svg")
+		.attr("id", "svg")
+		.attr({
+		width: w,
+		height: h})
+		.append('g')
+		.attr("transform", "translate(40,0)");
+
+	
+	//var splines = [];
+	//设置线的集簇
+	//生成集簇宽度为360
+	//深度为ry-120
+	var cluster = d3.layout.cluster()
+		.size([360, ry-120]);
+	
+	//var bundle = d3.layout.bundle();
+
+	//生成辐射线
+	//数据集中的dx为角度数值
+	//dy为深度数据，转化为半径
+	/*
+	var radialLine = d3.svg.line.radial()
+		.interpolate("bundle")
+		.tension(.8)
+		.radius(function(d){ return d.y;})
+		.angle(function(d){ return d.x/180*Math.PI;});
+	*/
+	dataset.queryAll(function(rows){
+		rows = rows['result'];
+		var nodes = cluster.nodes(dataset.getNodes(rows));
+		links = dataset.getLinks(nodes);
+		//生成捆数据
+		var splines = bundle(links);
+		//根据时间生成路径点的数据
+		
+		var path = svg.selectAll("path.link")
+			.data(links)
+			.enter()
+			.append("path")
+			.attr("class", function(d){
+				return "link source-" + d.source.name + 
+				  " target-" + d.target.name;})
+			.attr("d", function(d, i){
+				return radialLine(splines[i]);})
+			.on("click", clickLink)
+			.on("mouseover", hoverLink)
+			.on("mouseout", mouseout);
+
+		var node = svg.selectAll("g.node")
+			.data(nodes.filter(function(n){
+				return !n.children;}))
+			.enter()
+			.append("g")
+			.attr("class", "node")
+			.attr("id", function(d){
+				return d.name;})
+			.attr("transform", function(d){
+				return "rotate(" + (d.x-90) + 
+				")translate(" + d.y + ")"; });
+		node.append('circle')
+			.attr("r", 4.5)
+			.attr('fill', function(d){
+				d.color = dataset.color(d.x);
+				return d.color})			
+			.on("mouseover", mouseover)
+			.on("mouseout", mouseout);
+			
+		node.append('text')
+			.attr("dy", ".31em")
+			.attr("dx", function(d){
+				return d.x < 180 ? 8 : -8;})
+			.attr("text-anchor", function(d){
+				return d.x < 180 ? "start" : "end";})
+			.attr("transform", function(d){
+				return d.x < 180 ? null : "rotate(180)";})
+			.text(function(d){return d.name;})
+			.on("mouseover", mouseover)
+			.on("mouseout", mouseout)
+			.on("click", clickNode);
+
+		//创建无序列表
+		var node_list = header
+			.append("ul")
+			.attr("id", "node_item");
+		node_list.append("li")
+			.append("p")
+			.attr("class", "name_item")
+			.text("结点数")
+			.append("a")
+			.text(nodes.length);
+		node_list.append("li")
+			.append("p")
+			.attr("class", "link_item")
+			.text("连接数")
+			.append("a")
+			.text(links.length);
+	
+		//生成路径点的数据
+		var i = 0;
+		splines.forEach(function(d){
+			var radialPath = radialLine(d);	
+			var sourceName = links[i].source.name;
+			var targetName = links[i].target.name;
+			var path = getPath(radialPath);
+			//source的第一条路径必须为空，
+			//防止与target路径在绘制时冲突
+			if(!paths[sourceName]){
+				paths[sourceName] = {	source: [[]], 
+							target: [],
+							sourceColor:[]};
+			}
+			paths[sourceName].source.push(path);
+		
+			if(!paths[targetName]){
+				paths[targetName] = {	source: [[]], 
+							target: [],
+							sourceColor:[]};
+			}
+			paths[targetName].target.push(path);
+			paths[targetName].sourceColor.
+				push(links[i].source.color);	
+			i++;
+		});
+
+	});//queryAll
+
+     //获取路径信息
+	function getPath(radialPath){
+		//提取ML路径
+		var mpathReg = "M(-?\\d*\\.?\\d*e?-?\\d*)," +
+				"(-?\\d*\\.?\\d*e?-?\\d*)L(-?" +
+				"\\d*\\.?\\d*e?-?\\d*),"+
+				"(-?\\d*\\.?\\d*e?-?)";
+		var mpathReg = new RegExp(mpathReg);
+		var res = mpathReg.exec(radialPath);
+		var mpath = [];
+		var paths = [];
+		var point1, point2;
+		if(res){
+			point1 = {x: parseFloat(res[1]), 
+				y: parseFloat(res[2])};
+			point2 = {x: parseFloat(res[3]), 
+				y: parseFloat(res[4])};
+			mpath.push(point1);
+			mpath.push(point2);
+			paths.push(mpath);
+		}
+		//提取C路径
+		var cpath = [];
+		var cpathReg = "C(-?\\d*\\.?\\d*e?-?\\d*)," +
+				"(-?\\d*\\.?\\d*e?-?\\d*)," +
+				"(-?\\d*\\.?\\d*e?-?\\d*)," + 
+				"(-?\\d*\\.?\\d*e?-?\\d*)," + 
+				"(-?\\d*\\.?\\d*e?-?\\d*)," +
+				"(-?\\d*\\.?\\d*e?-?\\d*)";
+		cpathReg = new RegExp(cpathReg,'g');
+		cpath.push(point2);
+		while(res = cpathReg.exec(radialPath)){
+			for(var i = 1; i < res.length; i+=2){
+				cpath.push({x: parseFloat(res[i]), y: parseFloat(res[i+1])});
+			}
+			paths.push(cpath);
+			var des = cpath[cpath.length-1];
+			cpath = [des];
+		}
+		//提取L路径
+		var lpath = [];
+		var point3;
+		var lpathReg = "L(-?\\d*\\.?\\d*e?-?\\d*),"+
+				"(-?\\d*\\.?\\d*e?-?\\d*)$";
+		lpathReg = new RegExp(lpathReg);
+		res = lpathReg.exec(radialPath); 
+		if(res){
+			point3 = {x: parseFloat(res[1]), y: parseFloat(res[2])}
+			lpath.push(cpath[cpath.length-1]);
+			lpath.push(point3);
+			paths.push(lpath);
+		}
+		return paths;
+	}
+
+    //鼠标响应事件
+	function mouse(e){
+		return [e.pageX - rx, e.pageY - ry];
+	}
+	var selectedNode;
+	function clickNode(d){
+		selectedNode = d;
+		setLinkData(d);
+
+	}
+	function clickLink(d){
+		var a = d;
+		setSideList(d);
+	}
+	function hoverLink(d){
+		var link = d;	
+		var splines = bundle([d]);
+		svg.selectAll(".tmp_link").remove();
+		svg.style("cursor", "pointer");
+		svg.append("path")
+			.datum(d)
+			.on("click", clickLink)
+			.attr("class", "tmp_link")
+			.attr("d", radialLine(splines[0]))
+			.attr("fill", "none")
+			.attr("stroke", d.source.color)
+			.attr("stroke-width", 2)
+			.attr("opacity", 0)
+			.transition()
+			.attr("opacity", 1);
+	}
+	function mouseover(d){
+		svg.selectAll(".tmp_link").remove();
+		if(!running)
+			running = true;
+		var last = 0;
+		var curLink = paths[d.name];
+		if(!curLink)
+			return;
+		var sourceName = "source-" + d.name;
+		var targetName = "target-" + d.name;
+		
+		t = 0;
+		d3.timer(function(elapsed){
+			//在2秒内完成绘制路径
+			console.debug(elapsed);
+			t = (t+(elapsed - last) /1000)%1;
+			last = elapsed;
+			var sourceColor = d.color;
+			if(curLink.source.length > 1)
+				drawPaths(curLink.source, sourceColor, 2);
+
+			//因为target每条路径的颜色可能不同，所以要分开画
+			sourceColor = curLink.sourceColor;
+			if(curLink.target.length){
+				var i = 0;
+				curLink.target.forEach(function(L){
+					drawPaths([L], sourceColor[i], 2);
+				});
+				i++;
+			}
+			if((Math.abs(t/delta + 1 - 100) < 1)||!running){
+				if(!running){
+					var curves = 
+					svg.selectAll("path.curve");
+					curves.remove();
+				}
+				last = 0;
+				return true;
+			}
+		});
+
+   	}
+	function mouseout(d){
+
+		d3.timer.flush();
+		var curves = svg.selectAll("path.curve");
+		curves.remove();
+		running = false;
+    	}
+
+	//选择指定的路径
+	function selectPath(d){
+		var id = parseInt(this.id);
+		var link = paths[selectedNode.name][id];
+		
+	}
+
+	function updateNodes(name, value){
+
+    		return function(d){
+			if(value) this.parentNode.appendChild(this);
+			svg.select("#node-" + d[name].name)
+				.classed(name, value);
+		};
+    	}
+	function cross(a, b){
+		return a[0] * b[1] - a[1] * b[0];
+	}
+	function dot(a, b){
+		return a[0] * b[0] + a[1] * b[1];
+	}
+
+	//绘制路径
+	var line = d3.svg.line()
+		.x(function(d){return d.x;})
+		.y(function(d){return d.y;});
+
+	var running = true;
+	var t = 0.0;
+	var delta = .01;
+	//根据Path中的信息绘制曲线
+	function drawPaths(Path, color, width){
+
+		var curve_path = []; //计算每秒线条的位置
+		for(var i = 0; i < Path.length; i++){
+			curve_path.push(
+				getCurve(Path[i])[0]);	
+		}
+		var s_svg = svg.data(Path);
+		var curve = s_svg.selectAll("path.curve")
+			.data(curve_path);
+		curve.enter().append("path")
+			.attr("class", "curve");
+		curve.attr("d", line)
+			.attr("fill", function(d){
+				return "none";
+			})
+			.attr("stroke", color)
+			.attr("stroke-width", width);
+
+		return curve_path;
+	}
+
+	//计算贝赛尔曲线的路径
+	function interpolate(d, p) {
+		if (arguments.length < 2) p = t;
+			var r = [];
+			for (var i=1; i<d.length; i++) {
+				var d0 = d[i-1], d1 = d[i];
+				r.push({x: d0.x + (d1.x - d0.x) * p, 
+				y: d0.y + (d1.y - d0.y) * p});
+			}
+			return r;
+	}
+	function getLevels(d, t_, points) {
+		if (arguments.length < 2) t_ = t;
+		var x = [points];
+		for (var i=1; i<d; i++) {
+			x.push(interpolate(x[x.length-1], t_));
+		}
+		return x;
+	}
+
+	function getCurve(path) {
+		var curve = [];
+		//计算每一条路径在每毫秒内的位置
+		for(var i =0; path.length != i; i++){
+			var points= path[i];				
+			var d = points.length;
+			for (var t_=0; t_<=1; t_+=delta) {
+				var x = getLevels(d, t_, points);
+				curve.push(x[x.length-1][0]);
+			}
+		}
+		var curvePath = 1/curve.length;
+		return [curve.slice(0, t / curvePath + 1)];
+	}
+	//设置左边栏中的内容
+	function setSideList(d){
+		var node_list = d3.select("#node_item");
+		node_list.selectAll("li").remove();
+		var linkData;
+		d.source.linkData.forEach(function(link){
+			if(link.nextUrl == d.target.url){
+				linkData = link;
+				return ;
+			}
+		});
+		node_list.append("li")
+			.append("p")
+			.attr("class", "from_item")
+			.text("From")
+			.append("a")
+			.text(linkData.url);
+		node_list.append("li")
+			.append("p")
+			.attr("class", "to_item")
+			.text("To")
+			.append("a")
+			.text(linkData.nextUrl);
+		node_list.append("li")
+			.append("p")
+			.text("OptInfo")
+			.attr("class", "optInfo_item")
+			.append("a")
+			.text(linkData.opInfo);
+		node_list.append("li")	
+			.append("p")
+			.text("OptTime")
+			.attr("class", "optTime_item")
+			.append("a")
+			.text(linkData.opTime);
+		node_list.append("li")
+			.append("p")
+			.text("OptType")
+			.attr("class", "optType_item")
+			.append("a")
+			.text(linkData.opType);
+		node_list.append("li")
+			.append("p")
+			.text("UserIp")
+			.attr("class", "userIp_item")
+			.append("a")
+			.text(linkData.userIp);
+
+	}
+	//设置左边栏中linkdata的内容
+	function setLinkData(d){
+		var node_list = d3.select("#node_item");
+		node_list.selectAll("li").remove();
+		node_list.append("li")
+			.append("p")
+			.attr("class", "name_item")
+			.text("Node")
+			.append("a")
+			.text(d.name);
+		node_list.append("li")
+			.append("p")
+			.attr("class", "url_item")
+			.text("Url")
+			.append("a")
+			.text(d.url);
+		var link_list = node_list
+			.append("li")
+			.append("p")
+			.attr("class", "link_item")
+			.text("LinkData");
+
+		var i = 0;
+
+		var link_list = d3.select(".link_item")
+			.append("ul")
+			.selectAll("li")
+			.data(d.linkData)
+			.enter()
+			.append("li");
+		link_list.append("p")
+			.text("OptInfo")
+			.attr("class", "optInfo_item")
+			.append("a")
+			.text(function(d){return d.opInfo;});
+		link_list.append("p")
+			.text("OptTime")
+			.attr("class", "optTime_item")
+			.append("a")
+			.text(function(d){return d.opTime;});
+		link_list.append("p")
+			.text("UserIp")
+			.attr("class", "userIp_item")
+			.append("a")
+			.text(function(d){return d.userIp;});
+			
+	}
+
+    </script>
+  </body>
+</html>
